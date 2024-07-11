@@ -1,13 +1,17 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload } from '@nestjs/microservices';
-import { ProductService } from './product.service';
-import { CreateProductDto } from './dto/create-product.dto';
-import { UpdateProductDto } from './dto/update-product.dto';
 import { PaginationDto, User } from 'src/common';
+import { ProductService } from './product.service';
+import { CreateProductDto, UpdateProductDto } from './dto';
 
 @Controller()
 export class ProductController {
   constructor(private readonly productService: ProductService) {}
+
+  @MessagePattern('product.health')
+  health() {
+    return 'product service is up and running!';
+  }
 
   @MessagePattern('product.create')
   create(@Payload() payload: { createProductDto: CreateProductDto; user: User }) {
@@ -15,13 +19,13 @@ export class ProductController {
     return this.productService.create(createProductDto, user);
   }
 
-  @MessagePattern('product.findAll')
+  @MessagePattern('product.find.all')
   findAll(@Payload() payload: { paginationDto: PaginationDto; user: User }) {
     const { paginationDto, user } = payload;
     return this.productService.findAll(paginationDto, user);
   }
 
-  @MessagePattern('product.findOne')
+  @MessagePattern('product.find.id')
   findOne(@Payload() payload: { id: number; user: User }) {
     const { id, user } = payload;
     return this.productService.findOne(id, user);

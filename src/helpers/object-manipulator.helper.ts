@@ -15,6 +15,21 @@ export class ObjectManipulator {
   }
 
   /**
+   * Remove specified keys from an object
+   * @param obj The object to be manipulated
+   * @param keys The keys to be removed
+   * @returns void
+   */
+  static removeKeys<T extends object, K extends keyof T>(obj: T, keys: K[]): void {
+    if (!keys.length) {
+      console.warn('No keys to be removed from the object.');
+      return;
+    }
+
+    keys.forEach((key) => ObjectManipulator.safeDelete(obj, key));
+  }
+
+  /**
    * Exclude specified keys from an object
    * @param obj The object to be manipulated
    * @param keys The keys to be deleted

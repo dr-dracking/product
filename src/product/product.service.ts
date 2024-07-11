@@ -1,13 +1,12 @@
 import { HttpStatus, Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ClientProxy, RpcException } from '@nestjs/microservices';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Product } from '@prisma/client';
 import { firstValueFrom } from 'rxjs';
 
 import { PaginationDto, Role, User } from 'src/common';
 import { NATS_SERVICE } from 'src/config';
-import { hasRoles } from 'src/helpers';
-import { CreateProductDto } from './dto';
-import { UpdateProductDto } from './dto/update-product.dto';
+import { hasRoles, ObjectManipulator } from 'src/helpers';
+import { CreateProductDto, UpdateProductDto } from './dto';
 
 @Injectable()
 export class ProductService extends PrismaClient implements OnModuleInit {
@@ -34,79 +33,72 @@ export class ProductService extends PrismaClient implements OnModuleInit {
     const total = await this.product.count({ where });
     const lastPage = Math.ceil(total / limit);
 
-    const data = await this.product.findMany({
-      take: limit,
-      skip: (page - 1) * limit,
-      where,
+    const products = await this.product.findMany({ take: limit, skip: (page - 1) * limit, where });
+
+    // Extract all unique createdById and lastUpdatedById values
+    const userIds = new Set<string>();
+    products.forEach((product) => {
+      if (product.createdById) userIds.add(product.createdById);
+      if (product.lastUpdatedById) userIds.add(product.lastUpdatedById);
     });
 
-    return {
-      meta: { total, page, lastPage },
-      data,
-    };
+    // Fetch user data for all unique IDs
+    const userRequests = Array.from(userIds).map((id) => firstValueFrom(this.client.send('users.find.summary', { id })));
+    const users = await Promise.all(userRequests);
+    const userMap = new Map(users.map((user) => [user.id, user]));
+
+    // Map user data to products
+    const data = products.map((product) => ({
+      ...product,
+      createdBy: userMap.get(product.createdById) || null,
+      lastUpdatedBy: userMap.get(product.lastUpdatedById) || null,
+    }));
+
+    return { meta: { total, page, lastPage }, data };
   }
 
   async findOne(id: number, user: User) {
-    const product = await this.product.findUnique({
-      where: { id },
-    });
+    const product = await this.product.findUnique({ where: { id } });
 
-    if (!product)
-      throw new RpcException({
-        status: HttpStatus.NOT_FOUND,
-        message: `Product with id ${id} not found`,
-      });
+    if (!product) throw new RpcException({ status: HttpStatus.NOT_FOUND, message: `Product with id ${id} not found` });
 
     if (!hasRoles(user.roles, [Role.Admin]) && product.deletedAt)
-      throw new RpcException({
-        status: HttpStatus.NOT_FOUND,
-        message: `Product with id ${id} not found`,
-      });
+      throw new RpcException({ status: HttpStatus.NOT_FOUND, message: `Product with id ${id} not found` });
 
     const { createdById, lastUpdatedById } = product;
-    const [createdBy, lastUpdatedBy] = await Promise.all([
-      firstValueFrom(this.client.send('users.find.id.summary', { id: createdById })),
-      firstValueFrom(this.client.send('users.find.id.summary', { id: lastUpdatedById })),
-    ]);
+    ObjectManipulator.removeKeys(product, ['createdById', 'lastUpdatedById']);
+
+    const createdBy = await firstValueFrom(this.client.send('users.find.summary', { id: createdById }));
+
+    let lastUpdatedBy = null;
+
+    if (lastUpdatedById) lastUpdatedBy = await firstValueFrom(this.client.send('users.find.summary', { id: lastUpdatedById }));
 
     return { ...product, createdBy, lastUpdatedBy };
   }
 
-  async update(UpdateProductDto: UpdateProductDto, user: User) {
-    const { id, ...data } = UpdateProductDto;
-
-    const product = await this.findOne(id, user);
-
-    if (product.deletedAt !== null)
-      throw new RpcException({
-        status: HttpStatus.NOT_FOUND,
-        message: `Product with id ${id}, already deleted`,
-      });
-
-    return this.product.update({ where: { id }, data: { ...data, lastUpdatedById: user.id } });
+  async update(updateProductDto: UpdateProductDto, user: User) {
+    const { id, ...data } = updateProductDto;
+    await this.ensureProductExists(id, user);
+    return this.updateProductData(id, { ...data }, user);
   }
 
   async remove(id: number, user: User) {
-    const product = await this.findOne(id, user);
-
-    if (product.deletedAt !== null)
-      throw new RpcException({
-        status: HttpStatus.NOT_FOUND,
-        message: `Product with id ${id}, already deleted`,
-      });
-
-    return this.product.update({ where: { id }, data: { deletedAt: new Date(), lastUpdatedById: user.id } });
+    await this.ensureProductExists(id, user);
+    return this.updateProductData(id, { deletedAt: new Date(), lastUpdatedById: user.id }, user);
   }
 
   async restore(id: number, user: User) {
-    const product = await this.findOne(id, user);
+    await this.ensureProductExists(id, user);
+    return this.updateProductData(id, { deletedAt: null, lastUpdatedById: user.id }, user);
+  }
 
-    if (product.deletedAt === null)
-      throw new RpcException({
-        status: HttpStatus.NOT_FOUND,
-        message: `Product with id ${id}, already restored`,
-      });
+  private async ensureProductExists(id: number, user: User) {
+    return await this.findOne(id, user);
+  }
 
-    return this.product.update({ where: { id }, data: { deletedAt: null, lastUpdatedById: user.id } });
+  private async updateProductData(id: number, data: Partial<UpdateProductDto | Product>, user: User) {
+    await this.product.update({ where: { id }, data });
+    return this.findOne(id, user);
   }
 }

@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "product" ALTER COLUMN "price" SET DATA TYPE DECIMAL(20,4);
