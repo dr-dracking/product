@@ -5,7 +5,7 @@ import { AppModule } from './app.module';
 import { envs } from './config';
 
 async function bootstrap() {
-  const logger = new Logger('ProductsMain');
+  const logger = new Logger('ProductMain');
 
   const app = await NestFactory.createMicroservice<MicroserviceOptions>(AppModule, {
     transport: Transport.NATS,
@@ -20,6 +20,6 @@ async function bootstrap() {
   );
 
   app.listen();
-  logger.log(`Products ms is running on ${envs.port}`);
+  logger.log(`Product ms is running on ${envs.port}`);
 }
 bootstrap();
