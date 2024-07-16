@@ -93,6 +93,19 @@ export class ProductService extends PrismaClient implements OnModuleInit {
     return this.updateProductData(id, { deletedAt: null, lastUpdatedById: user.id }, user);
   }
 
+  async validate(ids: number[]) {
+    ids = Array.from(new Set(ids));
+
+    const products = await this.product.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, price: true } });
+
+    if (products.length !== ids.length) {
+      const missingIds = ids.filter((id) => !products.some((product) => product.id === id));
+      throw new RpcException({ status: HttpStatus.NOT_FOUND, message: `Products with ids ${missingIds.join(', ')} not found` });
+    }
+
+    return products;
+  }
+
   private async ensureProductExists(id: number, user: User) {
     return await this.findOne(id, user);
   }

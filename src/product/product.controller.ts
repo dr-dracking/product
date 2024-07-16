@@ -48,4 +48,10 @@ export class ProductController {
     const { id, user } = payload;
     return this.productService.restore(id, user);
   }
+
+  @MessagePattern('product.validate')
+  validate(@Payload() payload: { ids: number[] }) {
+    const { ids } = payload;
+    return this.productService.validate(ids);
+  }
 }
